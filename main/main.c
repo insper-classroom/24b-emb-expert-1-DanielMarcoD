@@ -1,17 +1,122 @@
-/**
- * Copyright (c) 2020 Raspberry Pi (Trading) Ltd.
- *
- * SPDX-License-Identifier: BSD-3-Clause
+#include <stdio.h>
+#include "pico/stdlib.h"   // stdlib 
+#include "hardware/irq.h"  // interrupts
+#include "hardware/pwm.h"  // pwm 
+#include "hardware/sync.h" // wait for interrupt 
+#include "hardware/adc.h"
+ 
+// Audio PIN is to match some of the design guide shields. 
+#define AUDIO_PIN 28  // you can change this to whatever you like
+#define ADC_NUM 0
+#define ADC_PIN (26 + ADC_NUM)
+#define ADC_VREF 3.3
+#define ADC_RANGE (1 << 12)
+#define ADC_CONVERT (ADC_VREF / (ADC_RANGE - 1))
+#define button 14
+
+/* 
+ * This include brings in static arrays which contain audio samples. 
+ * if you want to know how to make these please see the python code
+ * for converting audio samples into static arrays. 
  */
 
-#include <stdio.h>
-#include "pico/stdlib.h"
-#include "hardware/gpio.h"
 
-int main() {
+
+
+/*
+ * PWM Interrupt Handler which outputs PWM level and advances the 
+ * current sample. 
+ * 
+ * We repeat the same value for 8 cycles this means sample rate etc
+ * adjust by factor of 8   (this is what bitshifting <<3 is doing)
+ * 
+ */
+volatile int wav_position = 0;
+volatile uint8_t adc_list[38151];
+volatile int button_flag = 0;
+void pwm_interrupt_handler() {
+    pwm_clear_irq(pwm_gpio_to_slice_num(AUDIO_PIN));
+        
+    if (wav_position < (38151<<3) - 1) { 
+        // set pwm level 
+        // allow the pwm value to repeat for 8 cycles this is >>3 
+        pwm_set_gpio_level(AUDIO_PIN, adc_list[wav_position>>3]);  
+        wav_position++;
+    } else {
+        // reset to start
+        wav_position = 0;
+    }
+}
+
+void pin_callback(uint gpio, uint32_t events) {
+    if(events & GPIO_IRQ_EDGE_FALL) {
+        button_flag = 1;
+    }
+    else if(events & GPIO_IRQ_EDGE_RISE) {
+        button_flag = 0;
+        for(int i=0;i<38151;i++){
+            adc_list[i]=0;
+        }
+    }
+
+}
+
+int main(void) {
+    /* Overclocking for fun but then also so the system clock is a 
+     * multiple of typical audio sampling rates.
+     */
     stdio_init_all();
-    while (true) {
-        printf("Hello, world!\n");
-        sleep_ms(1000);
+    set_sys_clock_khz(176000, true); 
+    gpio_set_function(AUDIO_PIN, GPIO_FUNC_PWM);
+
+    int audio_pin_slice = pwm_gpio_to_slice_num(AUDIO_PIN);
+
+    // Setup PWM interrupt to fire when PWM cycle is complete
+    pwm_clear_irq(audio_pin_slice);
+    pwm_set_irq_enabled(audio_pin_slice, true);
+    // set the handle function above
+    irq_set_exclusive_handler(PWM_IRQ_WRAP, pwm_interrupt_handler); 
+    irq_set_enabled(PWM_IRQ_WRAP, true);
+
+    adc_init();
+    adc_gpio_init( ADC_PIN);
+    adc_select_input( ADC_NUM);
+    uint adc_raw;
+
+    // Setup PWM for audio output
+    pwm_config config = pwm_get_default_config();
+    /* Base clock 176,000,000 Hz divide by wrap 250 then the clock divider further divides
+     * to set the interrupt rate. 
+     * 
+     * 11 KHz is fine for speech. Phone lines generally sample at 8 KHz
+     * 
+     * 
+     * So clkdiv should be as follows for given sample rate
+     *  8.0f for 11 KHz
+     *  4.0f for 22 KHz
+     *  2.0f for 44 KHz etc
+     */
+    pwm_config_set_clkdiv(&config, 8.0f); 
+    pwm_config_set_wrap(&config, 250); 
+    pwm_init(audio_pin_slice, &config, true);
+
+    pwm_set_gpio_level(AUDIO_PIN, 0);
+
+    gpio_init(button);
+    gpio_set_dir(button, GPIO_IN);
+    gpio_pull_up(button);
+    gpio_set_irq_enabled_with_callback(button, GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, true, &pin_callback);
+    
+    
+    while(1) {
+        if(button_flag == 1){
+            printf("Button Pressed\n");
+            for(int i=0;i<38151;i++){
+                adc_raw = adc_read();
+                adc_list[i]= adc_raw>>4;
+                sleep_us(90.1);
+            }
+       }
+        __wfi(); // Wait for Interrupt
     }
 }
