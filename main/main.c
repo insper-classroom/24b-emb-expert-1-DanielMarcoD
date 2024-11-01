@@ -37,12 +37,11 @@ int main(void) {
 
     // Variáveis locais
     uint16_t adc_raw;
-    int button_state = 1;
     int speaking = 0;
 
     while (true) {
         // Leitura do estado do botão
-        button_state = gpio_get(BUTTON_PIN);
+        int button_state = gpio_get(BUTTON_PIN);
 
         // Verifica se o botão está pressionado
         if (button_state == 0) {
