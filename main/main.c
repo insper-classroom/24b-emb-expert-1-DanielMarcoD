@@ -38,7 +38,6 @@ int main(void) {
     // Variáveis locais
     uint16_t adc_raw;
     int button_state = 1;
-    int last_button_state = 1;
     int speaking = 0;
 
     while (true) {
@@ -66,8 +65,6 @@ int main(void) {
             // Aguarda próximo evento
             sleep_ms(1);
         }
-
-        last_button_state = button_state;
     }
 
     return 0;
