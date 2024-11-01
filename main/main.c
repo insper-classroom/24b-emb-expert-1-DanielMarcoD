@@ -2,6 +2,8 @@
 #include "pico/stdlib.h"   // stdlib 
 #include "hardware/pwm.h"  // pwm 
 #include "hardware/adc.h"  // adc
+#include "hardware/clocks.h"
+
 
 // Definições de pinos e constantes
 #define AUDIO_PIN 28
